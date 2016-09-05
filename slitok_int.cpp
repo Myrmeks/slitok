@@ -15,184 +15,184 @@
 class Task
 {
 public:
-	virtual ~Task() {}
-	virtual void run() = 0;
-	virtual void finalize() = 0;
+  virtual ~Task() {}
+  virtual void run() = 0;
+  virtual void finalize() = 0;
 };
 
 class TaskThread
 {
 public:
-	TaskThread(uint64_t emask, int efd);
-	~TaskThread();
-	void start();
-	void schedule(Task *task);
-	void finalize();
-	void stop();
+  TaskThread(uint64_t emask, int efd);
+  ~TaskThread();
+  void start();
+  void schedule(Task *task);
+  void finalize();
+  void stop();
 
-	uint64_t m_emask;
+  uint64_t m_emask;
 private:
-	enum TaskState
-	{
-		T_NONE,
-		T_TASK,
-		T_STOP
-	};
+  enum TaskState
+  {
+    T_NONE,
+    T_TASK,
+    T_STOP
+  };
 
-	TaskState m_state;
-	pthread_t m_thread;
-	Task *m_task;
-	pthread_mutex_t m_mutex;
-	pthread_cond_t m_cond;
-	int m_efd;
+  TaskState m_state;
+  pthread_t m_thread;
+  Task *m_task;
+  pthread_mutex_t m_mutex;
+  pthread_cond_t m_cond;
+  int m_efd;
 
-	static void *thread_proc(void *obj);
-	void run();
+  static void *thread_proc(void *obj);
+  void run();
 };
 
 TaskThread::TaskThread(uint64_t emask, int efd)
-	: m_emask(emask),
-		m_state(T_NONE),
-		m_efd(efd)
+  : m_emask(emask),
+    m_state(T_NONE),
+    m_efd(efd)
 {
-	pthread_mutex_init(&m_mutex, 0);
-	pthread_cond_init(&m_cond, 0);
+  pthread_mutex_init(&m_mutex, 0);
+  pthread_cond_init(&m_cond, 0);
 }
 
 TaskThread::~TaskThread()
 {
-	pthread_cond_destroy(&m_cond);
-	pthread_mutex_destroy(&m_mutex);
+  pthread_cond_destroy(&m_cond);
+  pthread_mutex_destroy(&m_mutex);
 }
 
 void TaskThread::start()
 {
-	pthread_create(&m_thread, 0, thread_proc, this);
+  pthread_create(&m_thread, 0, thread_proc, this);
 }
 
 void TaskThread::schedule(Task *task)
 {
-	pthread_mutex_lock(&m_mutex);
-	m_state = T_TASK;
-	m_task = task;
-	pthread_cond_broadcast(&m_cond);
-	pthread_mutex_unlock(&m_mutex);
+  pthread_mutex_lock(&m_mutex);
+  m_state = T_TASK;
+  m_task = task;
+  pthread_cond_broadcast(&m_cond);
+  pthread_mutex_unlock(&m_mutex);
 }
 
 void TaskThread::finalize()
 {
-	m_task->finalize();
-	delete m_task;
+  m_task->finalize();
+  delete m_task;
 }
 
 void TaskThread::stop()
 {
-	pthread_mutex_lock(&m_mutex);
-	m_state = T_STOP;
-	pthread_cond_broadcast(&m_cond);
-	pthread_mutex_unlock(&m_mutex);
-	pthread_join(m_thread, 0);
+  pthread_mutex_lock(&m_mutex);
+  m_state = T_STOP;
+  pthread_cond_broadcast(&m_cond);
+  pthread_mutex_unlock(&m_mutex);
+  pthread_join(m_thread, 0);
 }
 
 void *TaskThread::thread_proc(void *obj)
 {
-	((TaskThread*)obj)->run();
-	return 0;
+  ((TaskThread*)obj)->run();
+  return 0;
 }
 
 void TaskThread::run()
 {
-	pthread_mutex_lock(&m_mutex);
-	while (m_state != T_STOP)
-	{
-		while (m_state == T_NONE)
-			pthread_cond_wait(&m_cond, &m_mutex);
+  pthread_mutex_lock(&m_mutex);
+  while (m_state != T_STOP)
+  {
+    while (m_state == T_NONE)
+      pthread_cond_wait(&m_cond, &m_mutex);
 
-		if (m_state == T_TASK)
-		{
-			m_task->run();
-			m_state = T_NONE;
-			write(m_efd, &m_emask, 8);
-		}
-	}
-	pthread_mutex_unlock(&m_mutex);
+    if (m_state == T_TASK)
+    {
+      m_task->run();
+      m_state = T_NONE;
+      write(m_efd, &m_emask, 8);
+    }
+  }
+  pthread_mutex_unlock(&m_mutex);
 }
 
 class Dispatcher
 {
 public:
-	Dispatcher(int thread_num);
-	~Dispatcher();
-	void schedule(Task *task);
-	void synchronize();
+  Dispatcher(int thread_num);
+  ~Dispatcher();
+  void schedule(Task *task);
+  void synchronize();
 
 private:
-	int m_efd;
-	int m_thread_num;
-	uint64_t m_free_threads;
-	uint64_t m_thread_mask;
-	std::vector<TaskThread*> m_threads;
+  int m_efd;
+  int m_thread_num;
+  uint64_t m_free_threads;
+  uint64_t m_thread_mask;
+  std::vector<TaskThread*> m_threads;
 
-	void wait();
+  void wait();
 };
 
 Dispatcher::Dispatcher(int thread_num)
-	: m_thread_num(thread_num)
+  : m_thread_num(thread_num)
 {
-	m_efd = eventfd(0, 0);
-	m_thread_mask = ~((uint64_t)-1 << thread_num);
-	m_free_threads = m_thread_mask;
-	for (int i = 0; i < thread_num; ++i)
-		m_threads.push_back(new TaskThread(1ULL << i, m_efd));
-	for (int i = 0; i < thread_num; ++i)
-		m_threads[i]->start();
+  m_efd = eventfd(0, 0);
+  m_thread_mask = ~((uint64_t)-1 << thread_num);
+  m_free_threads = m_thread_mask;
+  for (int i = 0; i < thread_num; ++i)
+    m_threads.push_back(new TaskThread(1ULL << i, m_efd));
+  for (int i = 0; i < thread_num; ++i)
+    m_threads[i]->start();
 }
 
 Dispatcher::~Dispatcher()
 {
-	for (int i = 0; i < m_thread_num; ++i)
-	{
-		m_threads[i]->stop();
-		delete m_threads[i];
-	}
+  for (int i = 0; i < m_thread_num; ++i)
+  {
+    m_threads[i]->stop();
+    delete m_threads[i];
+  }
 }
 
 void Dispatcher::wait()
 {
-	uint64_t mask;
-	read(m_efd, &mask, 8);
-	m_free_threads |= mask;
-	for (int i = 0; i < m_thread_num; ++i)
-	{
-		if (mask & m_threads[i]->m_emask)
-			m_threads[i]->finalize();
-	}
+  uint64_t mask;
+  read(m_efd, &mask, 8);
+  m_free_threads |= mask;
+  for (int i = 0; i < m_thread_num; ++i)
+  {
+    if (mask & m_threads[i]->m_emask)
+      m_threads[i]->finalize();
+  }
 }
 
 void Dispatcher::schedule(Task *task)
 {
-	while (!m_free_threads)
-	{
-		wait();
-	}
+  while (!m_free_threads)
+  {
+    wait();
+  }
 
-	int th = 0;
-	for (; th < m_thread_num; ++th)
-	{
-		if (m_free_threads & m_threads[th]->m_emask)
-			break;
-	}
+  int th = 0;
+  for (; th < m_thread_num; ++th)
+  {
+    if (m_free_threads & m_threads[th]->m_emask)
+      break;
+  }
 
-	m_free_threads &= ~m_threads[th]->m_emask;
-	m_threads[th]->schedule(task);
+  m_free_threads &= ~m_threads[th]->m_emask;
+  m_threads[th]->schedule(task);
 }
 
 void Dispatcher::synchronize()
 {
-	while (m_free_threads != m_thread_mask)
-	{
-		wait();
-	}
+  while (m_free_threads != m_thread_mask)
+  {
+    wait();
+  }
 }
 
 Dispatcher *g_dispatcher;
@@ -357,7 +357,7 @@ void Sequence::print() const
     for (unsigned i = 0; i < len; ++i)
         printf("%u ", seq[i]);
     printf("\n");
-		fflush(stdout);
+    fflush(stdout);
 }
 
 #define TRIE_SIZE 200
@@ -480,25 +480,25 @@ void merge1(
 
 struct MergeData
 {
-	std::set<Sequence>::iterator start1;
-	std::set<Sequence>::iterator end1;
-	std::set<Sequence>::iterator start2;
-	std::set<Sequence>::iterator end2;
-	std::set<Sequence> rset;
-	std::set<Sequence> *grset;
-	std::set<Sequence> *lowset;
-	const SeqTrie *ref;
-	unsigned bmod;
+  std::set<Sequence>::iterator start1;
+  std::set<Sequence>::iterator end1;
+  std::set<Sequence>::iterator start2;
+  std::set<Sequence>::iterator end2;
+  std::set<Sequence> rset;
+  std::set<Sequence> *grset;
+  std::set<Sequence> *lowset;
+  const SeqTrie *ref;
+  unsigned bmod;
 };
 
 class MergeTask2 : public Task
 {
 public:
-	MergeData dd;
+  MergeData dd;
 
-	void run()
-	{
-		for (auto it = dd.start1; it != dd.end1; ++it)
+  void run()
+  {
+    for (auto it = dd.start1; it != dd.end1; ++it)
     {
         for (auto jt = dd.start2; jt != dd.end2; ++jt)
         {
@@ -514,13 +514,13 @@ public:
                 dd.rset.insert(r);
         }
     }
-	}
+  }
 
-	void finalize()
-	{
-		for (auto it = dd.rset.begin(); it != dd.rset.end(); ++it)
-			dd.grset->insert(*it);
-	}
+  void finalize()
+  {
+    for (auto it = dd.rset.begin(); it != dd.rset.end(); ++it)
+      dd.grset->insert(*it);
+  }
 };
 
 #define TASK_COUNT 20
@@ -530,40 +530,40 @@ void merge2(
     std::set<Sequence> &rset, const SeqTrie &ref, unsigned bmod
 )
 {
-	auto start1 = set1.begin();
-	long count = 0;
-	for (auto it = set1.begin(); ; ++it, ++count)
-	{
-		if (count == TASK_COUNT || it == set1.end())
-		{
-			MergeTask2 *task = new MergeTask2();
-			task->dd.start1 = start1;
-			task->dd.end1 = it;
-			task->dd.start2 = set2.begin();
-			task->dd.end2 = set2.end();
-			task->dd.grset = &rset;
-			task->dd.ref = &ref;
-			task->dd.bmod = bmod;
-			g_dispatcher->schedule(task);
+  auto start1 = set1.begin();
+  long count = 0;
+  for (auto it = set1.begin(); ; ++it, ++count)
+  {
+    if (count == TASK_COUNT || it == set1.end())
+    {
+      MergeTask2 *task = new MergeTask2();
+      task->dd.start1 = start1;
+      task->dd.end1 = it;
+      task->dd.start2 = set2.begin();
+      task->dd.end2 = set2.end();
+      task->dd.grset = &rset;
+      task->dd.ref = &ref;
+      task->dd.bmod = bmod;
+      g_dispatcher->schedule(task);
 
-			start1 = it;
-			count = 0;
-		}
+      start1 = it;
+      count = 0;
+    }
 
-		if (it == set1.end())
-			break;
-	}
-	g_dispatcher->synchronize();
+    if (it == set1.end())
+      break;
+  }
+  g_dispatcher->synchronize();
 }
 
 class MergeTask4 : public Task
 {
 public:
-	MergeData dd;
+  MergeData dd;
 
-	void run()
-	{
-		for (auto it = dd.start1; it != dd.end1; ++it)
+  void run()
+  {
+    for (auto it = dd.start1; it != dd.end1; ++it)
     {
         for (auto jt = dd.start2; jt != dd.end2; ++jt)
         {
@@ -574,13 +574,13 @@ public:
                 dd.rset.insert(r);
         }
     }
-	}
+  }
 
-	void finalize()
-	{
-		for (auto it = dd.rset.begin(); it != dd.rset.end(); ++it)
-			dd.grset->insert(*it);
-	}
+  void finalize()
+  {
+    for (auto it = dd.rset.begin(); it != dd.rset.end(); ++it)
+      dd.grset->insert(*it);
+  }
 };
 
 void merge4(
@@ -588,39 +588,39 @@ void merge4(
     std::set<Sequence> &rset, const SeqTrie &ref
 )
 {
-	auto start1 = set1.begin();
-	long count = 0;
-	for (auto it = set1.begin(); ; ++it, ++count)
-	{
-		if (count == TASK_COUNT || it == set1.end())
-		{
-			MergeTask4 *task = new MergeTask4();
-			task->dd.start1 = start1;
-			task->dd.end1 = it;
-			task->dd.start2 = set2.begin();
-			task->dd.end2 = set2.end();
-			task->dd.grset = &rset;
-			task->dd.ref = &ref;
-			g_dispatcher->schedule(task);
+  auto start1 = set1.begin();
+  long count = 0;
+  for (auto it = set1.begin(); ; ++it, ++count)
+  {
+    if (count == TASK_COUNT || it == set1.end())
+    {
+      MergeTask4 *task = new MergeTask4();
+      task->dd.start1 = start1;
+      task->dd.end1 = it;
+      task->dd.start2 = set2.begin();
+      task->dd.end2 = set2.end();
+      task->dd.grset = &rset;
+      task->dd.ref = &ref;
+      g_dispatcher->schedule(task);
 
-			start1 = it;
-			count = 0;
-		}
+      start1 = it;
+      count = 0;
+    }
 
-		if (it == set1.end())
-			break;
-	}
-	g_dispatcher->synchronize();
+    if (it == set1.end())
+      break;
+  }
+  g_dispatcher->synchronize();
 }
 
 class MergeTask3 : public Task
 {
 public:
-	MergeData dd;
+  MergeData dd;
 
-	void run()
-	{
-		for (auto it = dd.start1; it != dd.end1; ++it)
+  void run()
+  {
+    for (auto it = dd.start1; it != dd.end1; ++it)
     {
         for (auto jt = dd.start2; jt != dd.end2; ++jt)
         {
@@ -630,13 +630,13 @@ public:
             dd.rset.insert(r);
         }
     }
-	}
+  }
 
-	void finalize()
-	{
-		for (auto it = dd.rset.begin(); it != dd.rset.end(); ++it)
-			dd.grset->insert(*it);
-	}
+  void finalize()
+  {
+    for (auto it = dd.rset.begin(); it != dd.rset.end(); ++it)
+      dd.grset->insert(*it);
+  }
 };
 
 void merge3(
@@ -644,29 +644,29 @@ void merge3(
     std::set<Sequence> &rset, std::set<Sequence> &lowset
 )
 {
-	auto start1 = set1.begin();
-	long count = 0;
-	for (auto it = set1.begin(); ; ++it, ++count)
-	{
-		if (count == TASK_COUNT || it == set1.end())
-		{
-			MergeTask3 *task = new MergeTask3();
-			task->dd.start1 = start1;
-			task->dd.end1 = it;
-			task->dd.start2 = set2.begin();
-			task->dd.end2 = set2.end();
-			task->dd.grset = &rset;
-			task->dd.lowset = &lowset;
-			g_dispatcher->schedule(task);
+  auto start1 = set1.begin();
+  long count = 0;
+  for (auto it = set1.begin(); ; ++it, ++count)
+  {
+    if (count == TASK_COUNT || it == set1.end())
+    {
+      MergeTask3 *task = new MergeTask3();
+      task->dd.start1 = start1;
+      task->dd.end1 = it;
+      task->dd.start2 = set2.begin();
+      task->dd.end2 = set2.end();
+      task->dd.grset = &rset;
+      task->dd.lowset = &lowset;
+      g_dispatcher->schedule(task);
 
-			start1 = it;
-			count = 0;
-		}
+      start1 = it;
+      count = 0;
+    }
 
-		if (it == set1.end())
-			break;
-	}
-	g_dispatcher->synchronize();
+    if (it == set1.end())
+      break;
+  }
+  g_dispatcher->synchronize();
 }
 
 void trim1(
@@ -749,7 +749,7 @@ void generate3(
     {
         unsigned modsum = (sum / (mrob + i)) % bmod;
         printf("vars[i] = %lu\n", vars[i].size());
-				fflush(stdout);
+        fflush(stdout);
         for (auto it = vars[i].begin(); it != vars[i].end(); ++it)
         {
             std::set<Sequence> end;
@@ -778,7 +778,7 @@ void generate3(
     printf("locs[0].size = %lu\n", locs[0].size());
     printf("locs[1].size = %lu\n", locs[1].size());
     printf("locs[2].size = %lu\n", locs[2].size());
-		fflush(stdout);
+    fflush(stdout);
     for (auto it = locs[0].begin(); it != locs[0].end(); ++it)
     {
         if (locs[1].find(*it) == locs[1].end())
@@ -789,7 +789,7 @@ void generate3(
     }
 
     printf("set.size = %lu\n", set.size());
-		fflush(stdout);
+    fflush(stdout);
 }
 
 void generate4(
@@ -810,7 +810,7 @@ void generate4(
     {
         unsigned modsum = (sum / (mrob + i));
         printf("VARS[%d] = %lu\n", i, vars[i].size());
-				fflush(stdout);
+        fflush(stdout);
         unsigned step = 1;
         for (auto it = vars[i].begin(); it != vars[i].end(); ++it, ++step)
         {
@@ -846,7 +846,7 @@ void generate4(
             }
 
             printf("STEP = %u, ENDS = %lu, STOP=%d\n", step, end.size(), stop);
-						fflush(stdout);
+            fflush(stdout);
             if (stop)
                 continue;
 
@@ -857,78 +857,78 @@ void generate4(
         }
 
         printf("locs[%d].size = %lu\n", i, locs[i].size());
-				fflush(stdout);
+        fflush(stdout);
         if (locs[i].size() == 0)
             return;
     }
 
-		//SeqTrie myref;
-		//myref.add(locs[1]);
-		size_t count = 0;
-		for (auto kt = locs[1].begin(); kt != locs[1].end(); ++kt, ++count)
-		{
-			if ((count % 1000) == 0)
-			{
-				printf("count = %lu\n", count);
-				fflush(stdout);
-			}
-			SeqTrie myref;
-			std::set<Sequence> mylocs;
-			mylocs.insert(*kt);
-			myref.add(*kt);
-			for (int i = 0; i == 0; --i)
-			{
-					unsigned modsum = (sum / (mrob + i));
-					unsigned step = 1;
-					for (auto it = vars[i].begin(); it != vars[i].end(); ++it, ++step)
-					{
-							std::set<Sequence> end;
-							bool stop = false;
-							for (unsigned j = 0; j < it->len; ++j)
-							{
-									std::set<Sequence> low, mid;
-									generate1(low, pref, it->seq[j], modsum, 1, maxsum);
-									trim3(low, myref);
-									if (low.empty())
-									{
-											stop = true;
-											break;
-									}
-									if (j == 0)
-									{
-											end.swap(low);
-									}
-									else
-									{
-											if (i == 2 || j + 1 < it->len)
-													merge4(end, low, mid, myref);
-											else
-													merge3(end, low, mid, mylocs);
-											if (mid.empty())
-											{
-													stop = true;
-													break;
-											}
-											end.swap(mid);
-									}
-							}
+    //SeqTrie myref;
+    //myref.add(locs[1]);
+    size_t count = 0;
+    for (auto kt = locs[1].begin(); kt != locs[1].end(); ++kt, ++count)
+    {
+      if ((count % 1000) == 0)
+      {
+        printf("count = %lu\n", count);
+        fflush(stdout);
+      }
+      SeqTrie myref;
+      std::set<Sequence> mylocs;
+      mylocs.insert(*kt);
+      myref.add(*kt);
+      for (int i = 0; i == 0; --i)
+      {
+          unsigned modsum = (sum / (mrob + i));
+          unsigned step = 1;
+          for (auto it = vars[i].begin(); it != vars[i].end(); ++it, ++step)
+          {
+              std::set<Sequence> end;
+              bool stop = false;
+              for (unsigned j = 0; j < it->len; ++j)
+              {
+                  std::set<Sequence> low, mid;
+                  generate1(low, pref, it->seq[j], modsum, 1, maxsum);
+                  trim3(low, myref);
+                  if (low.empty())
+                  {
+                      stop = true;
+                      break;
+                  }
+                  if (j == 0)
+                  {
+                      end.swap(low);
+                  }
+                  else
+                  {
+                      if (i == 2 || j + 1 < it->len)
+                          merge4(end, low, mid, myref);
+                      else
+                          merge3(end, low, mid, mylocs);
+                      if (mid.empty())
+                      {
+                          stop = true;
+                          break;
+                      }
+                      end.swap(mid);
+                  }
+              }
 
-							if (stop)
-									continue;
+              if (stop)
+                  continue;
 
-							for (auto jt = end.begin(); jt != end.end(); ++jt)
-							{
-									locs[i].insert(*jt);
-							}
-					}
-			}
+              for (auto jt = end.begin(); jt != end.end(); ++jt)
+              {
+                  locs[i].insert(*jt);
+              }
+          }
+      }
     }
 
-		printf("locs[%d].size = %lu\n", 0, locs[0].size());
-		fflush(stdout);
+    printf("locs[%d].size = %lu\n", 0, locs[0].size());
+    fflush(stdout);
     set.swap(locs[0]);
     printf("set.size = %lu\n", set.size());
-		fflush(stdout);
+    fflush(stdout);
 }
 
 void generate_bs(
@@ -948,7 +948,7 @@ void generate_bs(
     {
         unsigned modsum = (sum / (mrob + i)) % (2 * bmod);
         printf("VARS[%d] = %lu\n", i, vars[i].size());
-				fflush(stdout);
+        fflush(stdout);
         unsigned step = 1;
         for (auto it = vars[i].begin(); it != vars[i].end(); ++it, ++step)
         {
@@ -984,7 +984,7 @@ void generate_bs(
             }
 
             printf("STEP = %u, ENDS = %lu, STOP=%d\n", step, end.size(), stop);
-						fflush(stdout);
+            fflush(stdout);
             if (stop)
                 continue;
 
@@ -995,106 +995,106 @@ void generate_bs(
         }
 
         printf("locs[%d].size = %lu\n", i, locs[i].size());
-				fflush(stdout);
+        fflush(stdout);
         if (locs[i].size() == 0)
             return;
     }
 
-		//SeqTrie myref;
-		//myref.add(locs[1]);
-		size_t count = 0;
-		for (auto kt = locs[1].begin(); kt != locs[1].end(); ++kt, ++count)
-		{
-			if ((count % 1000) == 0)
-			{
-				printf("count = %lu\n", count);
-				fflush(stdout);
-			}
-			SeqTrie myref;
-			std::set<Sequence> mylocs;
-			mylocs.insert(*kt);
-			myref.add(*kt);
-			for (int i = 0; i == 0; --i)
-			{
-					unsigned modsum = (sum / (mrob + i)) % (2 * bmod);
-					unsigned step = 1;
-					for (auto it = vars[i].begin(); it != vars[i].end(); ++it, ++step)
-					{
-							std::set<Sequence> end;
-							bool stop = false;
-							for (unsigned j = 0; j < it->len; ++j)
-							{
-									std::set<Sequence> low, mid;
-									generate2(low, pref, it->seq[j], modsum, 0, 2*bmod);
-									trim3(low, myref);
-									//trim2(low, ref, bmod);
-									if (low.empty())
-									{
-											stop = true;
-											break;
-									}
-									if (j == 0)
-									{
-											end.swap(low);
-									}
-									else
-									{
-											if (i == 2 || j + 1 < it->len)
-													merge4(end, low, mid, myref);
-													//merge2(end, low, mid, ref, bmod);
-											else
-													merge3(end, low, mid, mylocs);
-											if (mid.empty())
-											{
-													stop = true;
-													break;
-											}
-											end.swap(mid);
-									}
-							}
+    //SeqTrie myref;
+    //myref.add(locs[1]);
+    size_t count = 0;
+    for (auto kt = locs[1].begin(); kt != locs[1].end(); ++kt, ++count)
+    {
+      if ((count % 1000) == 0)
+      {
+        printf("count = %lu\n", count);
+        fflush(stdout);
+      }
+      SeqTrie myref;
+      std::set<Sequence> mylocs;
+      mylocs.insert(*kt);
+      myref.add(*kt);
+      for (int i = 0; i == 0; --i)
+      {
+          unsigned modsum = (sum / (mrob + i)) % (2 * bmod);
+          unsigned step = 1;
+          for (auto it = vars[i].begin(); it != vars[i].end(); ++it, ++step)
+          {
+              std::set<Sequence> end;
+              bool stop = false;
+              for (unsigned j = 0; j < it->len; ++j)
+              {
+                  std::set<Sequence> low, mid;
+                  generate2(low, pref, it->seq[j], modsum, 0, 2*bmod);
+                  trim3(low, myref);
+                  //trim2(low, ref, bmod);
+                  if (low.empty())
+                  {
+                      stop = true;
+                      break;
+                  }
+                  if (j == 0)
+                  {
+                      end.swap(low);
+                  }
+                  else
+                  {
+                      if (i == 2 || j + 1 < it->len)
+                          merge4(end, low, mid, myref);
+                          //merge2(end, low, mid, ref, bmod);
+                      else
+                          merge3(end, low, mid, mylocs);
+                      if (mid.empty())
+                      {
+                          stop = true;
+                          break;
+                      }
+                      end.swap(mid);
+                  }
+              }
 
-							if (stop)
-									continue;
+              if (stop)
+                  continue;
 
-							for (auto jt = end.begin(); jt != end.end(); ++jt)
-							{
-									locs[i].insert(*jt);
-							}
-					}
-			}
-		}
+              for (auto jt = end.begin(); jt != end.end(); ++jt)
+              {
+                  locs[i].insert(*jt);
+              }
+          }
+      }
+    }
 
-		printf("locs[%d].size = %lu\n", 0, locs[0].size());
-		fflush(stdout);
+    printf("locs[%d].size = %lu\n", 0, locs[0].size());
+    fflush(stdout);
 
     set.swap(locs[0]);
     printf("set.size = %lu\n", set.size());
-		fflush(stdout);
+    fflush(stdout);
 }
 
 // main
 int main()
 {
-		Dispatcher disp(8);
-		g_dispatcher = &disp;
+    Dispatcher disp(8);
+    g_dispatcher = &disp;
 
     Sequence pref;
     std::set<Sequence> ref1, fnd1, fnd2, fnd3;
     SeqTrie tref1, tref2, tref3;
 
-		printf("GEN1\n");
-		fflush(stdout);
+    printf("GEN1\n");
+    fflush(stdout);
     generate3(ref1, 7*8*9, 7, 18, 7);
     tref1.add(ref1);
-		printf("GEN2\n");
-		fflush(stdout);
+    printf("GEN2\n");
+    fflush(stdout);
     generate_bs(fnd1, tref1, 7*8*9, 7, 18, 7);
     tref2.add(fnd1);
-		printf("GEN3\n");
-		fflush(stdout);
+    printf("GEN3\n");
+    fflush(stdout);
     generate_bs(fnd2, tref2, 7*8*9, 7, 18, 7 * 2);
-		printf("GEN4\n");
-		fflush(stdout);
+    printf("GEN4\n");
+    fflush(stdout);
     tref3.add(fnd2);
     generate4(fnd3, tref3, 7*8*9, 7, 18, 7 * 4);
 
