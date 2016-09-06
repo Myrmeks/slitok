@@ -326,6 +326,26 @@ struct Sequence
 	uint8_t seq[20];
 };
 
+struct IntSeq
+{
+	int len;
+	int64_t seq[20];
+
+	bool operator<(const IntSeq &s) const
+	{
+		int bound = std::min(len, s.len);
+    for (int i = 0; i < bound; ++i)
+    {
+        if (seq[i] < s.seq[i])
+            return true;
+        else if (s.seq[i] < seq[i])
+            return false;
+    }
+
+    return (len < s.len);
+	}
+};
+
 struct RatSeq
 {
 	int len;
@@ -785,23 +805,94 @@ bool solve_matrix(Matrix &m, int level, Ratnum *sol)
 	return true;
 }
 
-bool check_stones(RatSeq &stones, int spos, int bnum, Ratnum bw)
+int64_t lcm(int64_t a, int64_t b)
+{
+	if (a == 1)
+		return b;
+	else if (b == 1)
+		return a;
+	return a * (b / gcd(a, b));
+}
+
+int64_t integrate_seq(RatSeq &rseq, IntSeq &iseq)
+{
+	iseq.len = rseq.len;
+	int64_t maxd = 1;
+	for (int i = 0; i < rseq.len; ++i)
+	{
+		if (rseq.seq[i].d > maxd)
+			maxd = rseq.seq[i].d;
+	}
+
+	if (maxd == 1)
+	{
+		for (int i = 0; i < rseq.len; ++i)
+			iseq.seq[i] = rseq.seq[i].n;
+		return 1;
+	}
+	else if (maxd == 2)
+	{
+		for (int i = 0; i < rseq.len; ++i)
+		{
+			if (rseq.seq[i].d == 2)
+				iseq.seq[i] = rseq.seq[i].n;
+			else
+				iseq.seq[i] = rseq.seq[i].n * 2;
+		}
+		return 2;
+	}
+
+	int g = 1;
+	for (int i = 0; i < rseq.len; ++i)
+		g = lcm(g, rseq.seq[i].d);
+
+	for (int i = 0; i < rseq.len; ++i)
+		iseq.seq[i] = rseq.seq[i].n * (g / rseq.seq[i].d);
+
+	return g;
+}
+
+bool check_stones(IntSeq &stones, int spos, int bnum, int64_t bw, int64_t mbw)
 {
 	if (bnum <= 1)
 		return true;
 
+	if (bw == mbw)
+	{
+		int i = stones.len - 1;
+		for (; i >= 0 && !stones.seq[i]; --i) {}
+		if (i < 0 || bw < stones.seq[i])
+			return false;
+
+		int64_t lbw = bw - stones.seq[i];
+		int64_t olds = stones.seq[i];
+		stones.seq[i] = 0;
+		int lbnum;
+		if (lbw > 0)
+			lbnum = bnum;
+		else
+		{
+			lbnum = bnum - 1;
+			lbw = mbw;
+		}
+
+		bool rc = check_stones(stones, 0, lbnum, lbw, mbw);
+		stones.seq[i] = olds;
+		return rc;
+	}
+
 	for (int i = spos; i < stones.len; ++i)
 	{
-		if (stones.seq[i].n == 0)
+		if (stones.seq[i] == 0)
 			continue;
 		if (bw < stones.seq[i])
 			break;
-		Ratnum lbw = bw - stones.seq[i];
-		Ratnum olds = stones.seq[i];
-		stones.seq[i] = Ratnum{0};
+		int64_t lbw = bw - stones.seq[i];
+		int64_t olds = stones.seq[i];
+		stones.seq[i] = 0;
 		int lbnum;
 		int lspos;
-		if (lbw.n > 0)
+		if (lbw > 0)
 		{
 			lbnum = bnum;
 			lspos = i + 1;
@@ -810,10 +901,10 @@ bool check_stones(RatSeq &stones, int spos, int bnum, Ratnum bw)
 		{
 			lbnum = bnum - 1;
 			lspos = 0;
-			lbw = Ratnum{ROBSUM2};
+			lbw = mbw;
 		}
 
-		bool rc = check_stones(stones, lspos, lbnum, lbw);
+		bool rc = check_stones(stones, lspos, lbnum, lbw, mbw);
 		stones.seq[i] = olds;
 		if (rc)
 			return true;
@@ -822,16 +913,15 @@ bool check_stones(RatSeq &stones, int spos, int bnum, Ratnum bw)
 	return false;
 }
 
-bool check_solution(RatSeq &seq, int bnum)
+bool check_solution(IntSeq &seq, int bnum, int64_t mbw)
 {
-	RatSeq tmp = seq;
-	bool rc = check_stones(tmp, 0, bnum, Ratnum{ROBSUM2});
+	int rc = check_stones(seq, 0, bnum, mbw, mbw);
 	return rc;
 }
 
 void do_l3(
 	std::set<RatSeq> &results, SeqTrieNode *tr, 
-	Matrix &m, int level, int maxlevel, int used[]
+	Matrix &m, int level, int maxlevel, int used[], MiddleIter *prev
 )
 {
 	if (level == maxlevel)
@@ -853,8 +943,10 @@ void do_l3(
 			}
 		}
 
-		std::sort(chseq.seq, chseq.seq + chseq.len);
-		if (!check_solution(chseq, ROBBERS_MIN - level))
+		IntSeq ichseq;
+		int64_t g = integrate_seq(chseq, ichseq);
+		std::sort(ichseq.seq, ichseq.seq + ichseq.len);
+		if (!check_solution(ichseq, ROBBERS_MIN - level, ROBSUM2 * g))
 			return;
 
 		std::sort(solseq.seq, solseq.seq + solseq.len);
@@ -872,7 +964,25 @@ void do_l3(
 		{
 			if (!it.unique())
 				continue;
+
 			bool skip = false;
+			if (prev && prev->len == i)
+			{
+				for (int j = 0; j < i; ++j)
+				{
+					if (it.index[j] > prev->index[j])
+						break;
+					else if (it.index[j] < prev->index[j])
+					{
+						skip = true;
+						break;
+					}
+				}	
+			}
+
+			if (skip)
+				continue;
+
 			for (int j = 0; j < i; ++j)
 			{
 				if (used[it.index[j]])
@@ -890,7 +1000,7 @@ void do_l3(
 
 			if (add_to_matrix(m, level, it))
 			{
-				do_l3(results, tr->links[i], m, level + 1, maxlevel, used);
+				do_l3(results, tr->links[i], m, level + 1, maxlevel, used, &it);
 			}
 
 			for (int j = 0; j < i; ++j)
@@ -939,7 +1049,7 @@ public:
 				continue;
 			++mycount;
 			int used[20] = {};
-			do_l3(results, &l3[m.fvlen].root, m, 0, m.fvlen, used);
+			do_l3(results, &l3[m.fvlen].root, m, 0, m.fvlen, used, 0);
 		}
 	}
 	
