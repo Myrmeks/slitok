@@ -218,23 +218,11 @@ struct Ratnum
 
 inline int64_t gcd(int64_t a, int64_t b)
 {
-	if (a == 0)
-		return b;
-	else if (b == 0)
-		return a;
-
 	if (a < 0)
 		a = -a;
 
-	if (b < 0)
-		b = -b;	
-
 	if (a < b)
-	{
-		int64_t tmp = a;
-		a = b;
-		b = tmp;
-	}
+    std::swap(a, b);
 
 	if (b == 1)
 		return 1;
@@ -251,31 +239,29 @@ inline int64_t gcd(int64_t a, int64_t b)
 	}
 }
 
+int64_t lcm(int64_t a, int64_t b)
+{
+	if (a == 1)
+		return b;
+	else if (b == 1)
+		return a;
+	return a * (b / gcd(a, b));
+}
+
 inline bool operator<(Ratnum r1, Ratnum r2)
 {
 	return (r1.n * r2.d < r2.n * r1.d);
 }
 
-inline Ratnum operator+(Ratnum r1, Ratnum r2)
-{
-	if (r1.n == 0)
-		return r2;
-	else if (r2.n == 0)
-		return r1;
-	int64_t n = r1.n * r2.d + r2.n * r1.d;
-	if (n == 0)
-		return Ratnum{0, 1};
-	int64_t d = r1.d * r2.d;
-	int64_t g = gcd(n, d);
-	return Ratnum{n/g, d/g};
-}
-
 inline Ratnum operator-(Ratnum r1, Ratnum r2)
 {
-	if (r1.n == 0)
+  if (r1.d == 1 && r2.d == 1)
+    return Ratnum{r1.n - r2.n, 1};
+	else if (r1.n == 0)
 		return Ratnum{-r2.n, r2.d};
 	else if (r2.n == 0)
 		return r1;
+
 	int64_t n = r1.n * r2.d - r2.n * r1.d;
 	if (n == 0)
 		return Ratnum{0, 1};
@@ -288,29 +274,29 @@ inline Ratnum operator*(Ratnum r1, Ratnum r2)
 {
 	if (r1.n == 0 || r2.n == 0)
 		return Ratnum{0, 1};
+  else if (r1.d == 1 && r2.d == 1)
+    return Ratnum{r1.n * r2.n, 1};
 	int64_t n = r1.n * r2.n;
 	int64_t d = r1.d * r2.d;
 	int64_t g = gcd(n, d);
 	return Ratnum{n/g, d/g};
 }
 
-inline Ratnum operator/(Ratnum r1, Ratnum r2)
+inline Ratnum rn_reverse(Ratnum r)
 {
-	if (r1.n == 0)
-		return Ratnum{0, 1};
-	int64_t n = r1.n * r2.d;
-	int64_t d = r1.d * r2.n;
-	if (d < 0)
-	{
-		d = -d;
-		n = -n;
-	}
-	int64_t g = gcd(n, d);
-	return Ratnum{n/g, d/g};
+  std::swap(r.n, r.d);
+  if (r.d < 0)
+  {
+    r.n = -r.n;
+    r.d = -r.d;
+  }
+  return r;
 }
 
 inline Ratnum rn_submul(Ratnum a, Ratnum b, Ratnum c)
 {
+  if (a.d == 1 && b.d == 1 && c.d == 1)
+    return Ratnum{a.n - b.n * c.n, 1};
 	int64_t bb = b.d * c.d;
 	int64_t n = a.n * bb - a.d * b.n * c.n;
 	if (n == 0)
@@ -633,12 +619,12 @@ int make_matrix(
 		nf[vj] = 1;
 		if (m.mat[i][vj].n != 1 || m.mat[i][vj].d != 1)
 		{
-			Ratnum alfa = m.mat[i][vj];
+			Ratnum alfa = rn_reverse(m.mat[i][vj]);
 			m.mat[i][vj] = Ratnum{1};
 			for (int j = vj + 1; j <= STONES_NUM; ++j)
 			{
 				if (m.mat[i][j].n)
-					m.mat[i][j] = m.mat[i][j] / alfa;
+					m.mat[i][j] = m.mat[i][j] * alfa;
 			}
 		}
 
@@ -775,18 +761,18 @@ bool add_to_matrix(Matrix &m, int level, MiddleIter &mit)
 			m.mv[ll] = vj;
 			if (m.mat[ll][vj].n != 1 || m.mat[ll][vj].d != 1)
 			{
-				Ratnum alfa = m.mat[ll][vj];
+				Ratnum alfa = rn_reverse(m.mat[ll][vj]);
 				m.mat[ll][vj] = Ratnum{1};
 				for (int j = i + 1; j < m.fvlen; ++j)
 				{
 					int kk = m.fv[j];
 					if (m.mat[ll][kk].n)
-						m.mat[ll][kk] = m.mat[ll][kk] / alfa;
+						m.mat[ll][kk] = m.mat[ll][kk] * alfa;
 				}
 
 				int kk = STONES_NUM;
 				if (m.mat[ll][kk].n)
-					m.mat[ll][kk] = m.mat[ll][kk] / alfa;
+					m.mat[ll][kk] = m.mat[ll][kk] * alfa;
 			}
 			return true;
 		}
@@ -831,15 +817,6 @@ bool solve_matrix(Matrix &m, int level, Ratnum *sol)
 	}
 
 	return true;
-}
-
-int64_t lcm(int64_t a, int64_t b)
-{
-	if (a == 1)
-		return b;
-	else if (b == 1)
-		return a;
-	return a * (b / gcd(a, b));
 }
 
 int64_t integrate_seq(RatSeq &rseq, IntSeq &iseq)
