@@ -688,6 +688,34 @@ int make_matrix(
 	return rang;
 }
 
+bool precheck_matrix(Matrix &m)
+{
+	int mh = ROBBERS_MIN * 2 + 3;
+	for (int i = 0; i < mh; ++i)
+	{
+		if (m.mv[i] < 0)
+			continue;
+
+		bool skip = false;
+		for (int j = 0; j < m.fvlen; ++j)
+		{
+			if (m.mat[i][m.fv[j]].n < 0)
+			{
+				skip = true;
+				break;
+			}
+		}
+
+		if (skip)
+			continue;
+		
+		if (m.mat[i][STONES_NUM].n <= 0)
+			return false;
+	}
+
+	return true;
+}
+
 bool add_to_matrix(Matrix &m, int level, MiddleIter &mit)
 {
 	int mh = ROBBERS_MIN * 2 + 3;
@@ -1048,6 +1076,8 @@ public:
 			if (!rang)
 				continue;
 			++mycount;
+			if (!precheck_matrix(m))
+				continue;
 			int used[20] = {};
 			do_l3(results, &l3[m.fvlen].root, m, 0, m.fvlen, used, 0);
 		}
